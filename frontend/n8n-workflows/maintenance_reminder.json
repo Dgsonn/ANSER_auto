@@ -1,0 +1,154 @@
+{
+  "name": "ANSER Auto — Nhắc bảo dưỡng định kỳ",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1, "triggerAtHour": 8 }] }
+      },
+      "id": "mr-trigger",
+      "name": "Mỗi ngày 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:3000/api/n8n/internal/due-for-service?days=7&km=500",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-Internal-Token", "value": "REPLACE_WITH_N8N_INTERNAL_TOKEN" }]
+        },
+        "options": {}
+      },
+      "id": "mr-fetch",
+      "name": "Lấy xe tới hạn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "id": "mr-split",
+      "name": "Tách từng xe",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [620, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.contactable }}", "value2": true }]
+        }
+      },
+      "id": "mr-if-contactable",
+      "name": "Khách có email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [840, 200]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Một email cho MỖI khách — nhắc bảo dưỡng là thư cá nhân, không phải bảng tổng hợp.\nconst v = $json;\nconst company = $('Lấy xe tới hạn').first().json.company_name || 'Gara';\n\nconst mocDate = v.next_service_at ? new Date(v.next_service_at).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : null;\nconst mocKm = v.next_service_odometer ? Number(v.next_service_odometer).toLocaleString('vi-VN') + ' km' : null;\n\nconst moc = [mocDate ? `ngày <b>${mocDate}</b>` : null, mocKm ? `mốc <b>${mocKm}</b>` : null].filter(Boolean).join(' hoặc ');\n\nconst html = `<h2>🚗 Đến lịch bảo dưỡng xe ${v.license_plate}</h2>`\n  + `<p>Chào ${v.customer_name || 'Quý khách'},</p>`\n  + `<p>Xe <b>${v.vehicle}</b> — biển số <b>${v.license_plate}</b> của Quý khách đã ${v.due_reason_label}${moc ? ` (${moc})` : ''}.</p>`\n  + (v.odometer ? `<p>Số km ghi nhận gần nhất: <b>${Number(v.odometer).toLocaleString('vi-VN')} km</b>.</p>` : '')\n  + `<p>Quý khách vui lòng liên hệ để đặt lịch vào xưởng, tránh phải chờ vào giờ cao điểm.</p>`\n  + `<p style=\"color:#888;font-size:12px\">${company}</p>`;\n\nreturn { json: {\n  email_to: v.customer_email,\n  email_subject: `🚗 Xe ${v.license_plate} đã đến lịch bảo dưỡng`,\n  email_html: html\n} };"
+      },
+      "id": "mr-format",
+      "name": "Soạn thư cho khách",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 120]
+    },
+    {
+      "parameters": {
+        "fromEmail": "care@anser.auto",
+        "toEmail": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "html": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "id": "mr-email-customer",
+      "name": "Gửi khách hàng",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1280, 120]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [{ "value1": "={{ $json.count }}", "operation": "larger", "value2": 0 }]
+        }
+      },
+      "id": "mr-if-count",
+      "name": "Có xe tới hạn?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [620, 440]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Bản tổng hợp cho gara. Quan trọng nhất là cột \"Liên hệ\": khách không có email thì\n// email tự động không tới được — phải có người gọi điện, nên danh sách đó phải hiện ra\n// chứ không được im lặng biến mất.\nconst d = $json;\nconst items = d.items || [];\nconst khongCoEmail = items.filter(v => !v.contactable);\n\nconst rows = items.map(v => `<tr><td>${v.license_plate}</td><td>${v.vehicle}</td><td>${v.customer_name || '—'}</td><td>${v.customer_phone || '—'}</td><td>${v.due_reason_label}</td><td>${v.contactable ? 'Đã gửi email' : '⚠️ Gọi điện'}</td></tr>`).join('');\n\nconst html = `<h2>🔧 ${items.length} xe tới hạn bảo dưỡng</h2>`\n  + `<p>Đã gửi email tự động cho <b>${d.contactable_count}</b> khách. Còn <b>${khongCoEmail.length}</b> khách chưa có email — cần gọi điện.</p>`\n  + `<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse\">`\n  + `<tr><th>Biển số</th><th>Xe</th><th>Khách hàng</th><th>SĐT</th><th>Lý do</th><th>Liên hệ</th></tr>${rows}</table>`\n  + `<p style=\"color:#888;font-size:12px\">ANSER Auto — ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</p>`;\n\nreturn { json: { email_to: d.company_email, email_subject: `🔧 ${items.length} xe tới hạn bảo dưỡng`, email_html: html } };"
+      },
+      "id": "mr-format-summary",
+      "name": "Soạn bản tổng hợp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 440]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.email_to }}", "operation": "isNotEmpty" }]
+        }
+      },
+      "id": "mr-if-company-email",
+      "name": "Gara có email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1060, 440]
+    },
+    {
+      "parameters": {
+        "fromEmail": "alerts@anser.auto",
+        "toEmail": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "html": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "id": "mr-email-garage",
+      "name": "Gửi gara",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1280, 440]
+    }
+  ],
+  "connections": {
+    "Mỗi ngày 8h": { "main": [[{ "node": "Lấy xe tới hạn", "type": "main", "index": 0 }]] },
+    "Lấy xe tới hạn": {
+      "main": [
+        [
+          { "node": "Tách từng xe", "type": "main", "index": 0 },
+          { "node": "Có xe tới hạn?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Tách từng xe": { "main": [[{ "node": "Khách có email?", "type": "main", "index": 0 }]] },
+    "Khách có email?": {
+      "main": [[{ "node": "Soạn thư cho khách", "type": "main", "index": 0 }], []]
+    },
+    "Soạn thư cho khách": { "main": [[{ "node": "Gửi khách hàng", "type": "main", "index": 0 }]] },
+    "Có xe tới hạn?": {
+      "main": [[{ "node": "Soạn bản tổng hợp", "type": "main", "index": 0 }], []]
+    },
+    "Soạn bản tổng hợp": { "main": [[{ "node": "Gara có email?", "type": "main", "index": 0 }]] },
+    "Gara có email?": {
+      "main": [[{ "node": "Gửi gara", "type": "main", "index": 0 }], []]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}

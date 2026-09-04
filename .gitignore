@@ -1,0 +1,8 @@
+# Repo gốc chỉ chứa tài liệu — code nằm trong frontend/ (có .gitignore riêng).
+# File này che các bí mật nếu ai đó lỡ đặt chúng ở thư mục gốc thay vì trong frontend/.
+.env
+.env.*
+!.env.example
+
+node_modules/
+.DS_Store

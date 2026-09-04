@@ -1,0 +1,79 @@
+{
+  "name": "ANSER Auto — Báo cáo doanh thu ngày",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 1, "triggerAtHour": 20 }] }
+      },
+      "id": "rr-trigger",
+      "name": "Mỗi ngày 20h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:3000/api/n8n/internal/revenue?period=day",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-Internal-Token", "value": "REPLACE_WITH_N8N_INTERNAL_TOKEN" }]
+        },
+        "options": {}
+      },
+      "id": "rr-fetch",
+      "name": "Lấy doanh thu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const d = $json;\nconst s = d.summary || {};\nconst vnd = n => new Intl.NumberFormat('vi-VN').format(n || 0) + '₫';\n\nconst dongDichVu = (d.top_services || []).map(x => `<tr><td>${x.name}</td><td align=\"right\">${x.quantity}</td><td align=\"right\">${vnd(x.revenue)}</td></tr>`).join('');\nconst dongPhuTung = (d.top_parts || []).map(x => `<tr><td>${x.name}</td><td align=\"right\">${x.quantity}</td><td align=\"right\">${vnd(x.revenue)}</td></tr>`).join('');\n\n// Công nợ để riêng chứ không trừ ngầm vào doanh thu: hai con số trả lời hai câu hỏi\n// khác nhau — \"làm được bao nhiêu\" và \"thu về được bao nhiêu\".\nconst html = `<h2>📊 Báo cáo doanh thu ${d.period_label}</h2>`\n  + `<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse\">`\n  + `<tr><td>Số hoá đơn</td><td align=\"right\"><b>${s.invoice_count || 0}</b></td></tr>`\n  + `<tr><td>Doanh thu</td><td align=\"right\"><b>${vnd(s.revenue)}</b></td></tr>`\n  + `<tr><td>Đã thu</td><td align=\"right\">${vnd(s.collected)}</td></tr>`\n  + `<tr><td>Còn phải thu</td><td align=\"right\"><b style=\"color:#c00\">${vnd(s.outstanding)}</b></td></tr>`\n  + `<tr><td>Tiền công</td><td align=\"right\">${vnd(s.labor_revenue)}</td></tr>`\n  + `<tr><td>Tiền phụ tùng</td><td align=\"right\">${vnd(s.parts_revenue)}</td></tr>`\n  + `</table>`\n  + (dongDichVu ? `<h3>Hạng mục dịch vụ nhiều nhất</h3><table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse\"><tr><th>Hạng mục</th><th>SL</th><th>Doanh thu</th></tr>${dongDichVu}</table>` : '')\n  + (dongPhuTung ? `<h3>Phụ tùng bán nhiều nhất</h3><table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse\"><tr><th>Phụ tùng</th><th>SL</th><th>Doanh thu</th></tr>${dongPhuTung}</table>` : '')\n  + `<p style=\"color:#888;font-size:12px\">${d.company_name} — ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</p>`;\n\nreturn { json: {\n  email_to: d.company_email || '',\n  email_subject: `📊 Doanh thu ${d.period_label}: ${vnd(s.revenue)}`,\n  email_html: html\n} };"
+      },
+      "id": "rr-format",
+      "name": "Soạn báo cáo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.email_to }}", "operation": "isNotEmpty" }]
+        }
+      },
+      "id": "rr-if-email",
+      "name": "Có email nhận?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "reports@anser.auto",
+        "toEmail": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "html": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "id": "rr-email",
+      "name": "Gửi Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1060, 220]
+    }
+  ],
+  "connections": {
+    "Mỗi ngày 20h": { "main": [[{ "node": "Lấy doanh thu", "type": "main", "index": 0 }]] },
+    "Lấy doanh thu": { "main": [[{ "node": "Soạn báo cáo", "type": "main", "index": 0 }]] },
+    "Soạn báo cáo": { "main": [[{ "node": "Có email nhận?", "type": "main", "index": 0 }]] },
+    "Có email nhận?": {
+      "main": [[{ "node": "Gửi Email", "type": "main", "index": 0 }], []]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}

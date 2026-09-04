@@ -1,0 +1,1 @@
+ALTER TABLE "service_order_special_orders" ADD COLUMN "unit" text DEFAULT 'Cái' NOT NULL;

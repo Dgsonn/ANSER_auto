@@ -1,0 +1,37 @@
+# Tên project cố định: bắt buộc, vì Compose mặc định lấy tên project từ tên thư mục chứa
+# file này ("frontend") — và ANSER-web-v2/frontend cũng tên "frontend". Không đặt tên riêng,
+# "docker compose up" ở dự án nào chạy SAU sẽ dò thấy container "frontend" của dự án kia,
+# thấy container_name lệch với compose file của nó, rồi RECREATE (tức là xoá & tạo lại) —
+# đã xảy ra thật một lần trong lúc phát triển, phải khôi phục thủ công container n8n của
+# ANSER-web-v2. Xem ARCHITECTURE.md §8.4.
+name: anser_auto
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: anser-auto-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5681}:5678"
+    environment:
+      # N8N_SECURE_COOKIE=false cần cho HTTP (không phải HTTPS).
+      - N8N_SECURE_COOKIE=false
+      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
+      # Không có dòng này, n8n báo URL webhook theo cổng nội bộ (5678) thay vì cổng đã
+      # map ra host, khiến test thủ công bị sai URL.
+      - WEBHOOK_URL=http://localhost:${N8N_PORT:-5681}/
+    volumes:
+      - anser_auto_n8n_data:/home/node/.n8n
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: anser-auto-mailhog
+    restart: unless-stopped
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1027}:1025" # SMTP — node Send Email của n8n kết nối vào đây
+      - "${MAILHOG_WEB_PORT:-8027}:8025" # Web UI — xem "email đã gửi" tại localhost:8027
+
+volumes:
+  anser_auto_n8n_data:
+# Cổng 5681/1027/8027 được chọn để KHÔNG đụng ANSER Flask (5680/1025/8025) và
+# ANSER Web v2 (5679/1026/8026) nếu chạy song song trên cùng một máy.

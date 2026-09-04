@@ -1,0 +1,77 @@
+{
+  "name": "ANSER Auto — Báo tiến độ sửa chữa",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-status",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "os-webhook",
+      "name": "Nhận đổi trạng thái",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Payload từ notifyOrderStatusChanged() trong src/server/n8n.ts. Webhook n8n bọc body\n// trong `.body`, nhưng khi test thủ công thì không — nhận cả hai dạng để chạy test trong\n// n8n UI không cho kết quả khác lúc chạy thật.\nconst raw = $json;\nconst d = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\n\nconst vnd = n => (n === null || n === undefined) ? null : new Intl.NumberFormat('vi-VN').format(n) + '₫';\nconst hen = d.promised_at ? new Date(d.promised_at).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : null;\n\n// Mỗi mốc trạng thái cần một lời nhắn khác nhau — cùng một câu cho cả \"đã báo giá\" và\n// \"đã giao xe\" thì khách không biết phải làm gì tiếp.\nconst noiDung = {\n  quoted: `Xe của Quý khách đã được kiểm tra xong và chúng tôi đã lập báo giá${d.total ? ` với tổng chi phí dự kiến <b>${vnd(d.total)}</b>` : ''}. Xin Quý khách xác nhận để xưởng bắt đầu thi công.`,\n  awaiting_acceptance: `Xe của Quý khách đã sửa chữa xong${hen ? ` và sẵn sàng để Quý khách nghiệm thu từ <b>${hen}</b>` : ''}. Quý khách vui lòng sắp xếp thời gian tới kiểm tra và nhận xe.`,\n  delivered: `Xe của Quý khách đã được bàn giao${d.total ? `. Tổng chi phí: <b>${vnd(d.total)}</b>` : ''}. Cảm ơn Quý khách đã tin tưởng sử dụng dịch vụ.`\n}[d.status] || `Lệnh sửa chữa đã chuyển sang trạng thái: <b>${d.status_label}</b>.`;\n\nconst html = `<h2>🔧 ${d.status_label} — xe ${d.license_plate}</h2>`\n  + `<p>Chào ${d.customer_name || 'Quý khách'},</p>`\n  + `<p>${noiDung}</p>`\n  + `<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse\">`\n  + `<tr><td>Lệnh sửa chữa</td><td><b>${d.order_code}</b></td></tr>`\n  + `<tr><td>Biển số</td><td>${d.license_plate}</td></tr>`\n  + (d.vehicle ? `<tr><td>Xe</td><td>${d.vehicle}</td></tr>` : '')\n  + (hen ? `<tr><td>Hẹn trả xe</td><td>${hen}</td></tr>` : '')\n  + (d.total ? `<tr><td>Tổng chi phí</td><td><b>${vnd(d.total)}</b></td></tr>` : '')\n  + `</table>`\n  + (d.note ? `<p>Ghi chú từ xưởng: <i>${d.note}</i></p>` : '')\n  + `<p style=\"color:#888;font-size:12px\">${d.branch_name || 'ANSER Auto'}${d.branch_phone ? ` — ${d.branch_phone}` : ''}</p>`;\n\nreturn { json: {\n  email_to: d.customer_email || '',\n  email_subject: `🔧 ${d.status_label} — xe ${d.license_plate} (${d.order_code})`,\n  email_html: html\n} };"
+      },
+      "id": "os-format",
+      "name": "Soạn thư báo khách",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.email_to }}", "operation": "isNotEmpty" }]
+        }
+      },
+      "id": "os-if-email",
+      "name": "Có email khách?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "care@anser.auto",
+        "toEmail": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "html": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "id": "os-email",
+      "name": "Gửi Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Webhook dùng responseMode=lastNode nên nhánh này phải trả về gì đó, không thì bên\n// gọi treo chờ. triggerN8nWebhook() là fire-and-forget nên không đọc kết quả, nhưng để\n// trống vẫn khiến execution hiện là lỗi trong lịch sử chạy.\nreturn [{ json: { skipped: true, reason: 'Khách hàng chưa có email' } }];"
+      },
+      "id": "os-skip",
+      "name": "Bỏ qua (không có email)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 420]
+    }
+  ],
+  "connections": {
+    "Nhận đổi trạng thái": { "main": [[{ "node": "Soạn thư báo khách", "type": "main", "index": 0 }]] },
+    "Soạn thư báo khách": { "main": [[{ "node": "Có email khách?", "type": "main", "index": 0 }]] },
+    "Có email khách?": {
+      "main": [
+        [{ "node": "Gửi Email", "type": "main", "index": 0 }],
+        [{ "node": "Bỏ qua (không có email)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}
