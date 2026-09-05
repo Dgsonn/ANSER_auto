@@ -49,6 +49,8 @@ const MANAGER_NAV: NavItem[] = [
 // ARCHITECTURE.md §5.2, vì đây là dữ liệu giờ công của mọi người, không phải chỉ để tiện.
 const ACCOUNTANT_NAV: NavItem[] = [
   { label: "Hoá đơn", icon: ReceiptIcon, href: "/dashboard/invoices" },
+  { label: "Sổ bán hàng", icon: ReceiptIcon, href: "/dashboard/sales-ledger" },
+  { label: "Sổ mua hàng", icon: ReceiptIcon, href: "/dashboard/purchase-ledger" },
   { label: "Báo cáo doanh thu", icon: ChartIcon, href: "/dashboard/reports" },
   { label: "Chấm công nhân sự", icon: ClockIcon, href: "/dashboard/staff-attendance" },
 ];

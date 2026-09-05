@@ -462,6 +462,60 @@ export const automationRules = pgTable("automation_rules", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ---------------------------------------------------------------------------
+// Sổ kế toán (mua/bán hàng hoá, dịch vụ) — độc lập với nghiệp vụ sửa xe
+// ---------------------------------------------------------------------------
+
+// Sổ bán hàng (kế toán) — hoá đơn bán hàng hoá/dịch vụ nói chung, KHÔNG gắn lệnh sửa chữa cụ
+// thể (khác `invoices`, vốn bắt buộc 1-1 với `service_orders`). Dùng cho sổ sách khai thuế
+// thật của xưởng — phần lớn khách ở đây là công ty bảo hiểm chi trả cho xe tai nạn, nhưng
+// dữ liệu gốc không ghi biển số/lệnh sửa xe nào, nên không thể (và không nên bịa) liên kết
+// chéo. `partnerName` lưu dạng text snapshot, không FK `customers` — đúng tên trên hoá đơn
+// tại thời điểm lập, không đồng bộ ngược khi khách đổi tên.
+export const salesLedger = pgTable("sales_ledger", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  voucherDate: timestamp("voucher_date", { withTimezone: true }).notNull(), // Ngày chứng từ
+  voucherNo: text("voucher_no"), // Số chứng từ
+  invoiceNo: text("invoice_no"), // Số hóa đơn
+  partnerName: text("partner_name").notNull(), // Khách hàng
+  amountBeforeTax: integer("amount_before_tax").notNull().default(0), // Tổng tiền hàng
+  vatAmount: integer("vat_amount").notNull().default(0), // Tiền thuế GTGT
+  totalAmount: integer("total_amount").notNull().default(0), // Tổng tiền thanh toán
+  invoiceIssued: boolean("invoice_issued").notNull().default(false), // Đã lập hóa đơn
+  goodsDelivered: boolean("goods_delivered").notNull().default(false), // Đã xuất hàng
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Sổ mua hàng (kế toán) — đối xứng với `salesLedger`, không FK `parts`/`part_transactions`
+// vì dữ liệu gốc chỉ có tổng tiền theo hoá đơn mua, không có dòng chi tiết từng phụ tùng.
+export const purchaseLedger = pgTable("purchase_ledger", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  postingDate: timestamp("posting_date", { withTimezone: true }).notNull(), // Ngày hạch toán
+  voucherDate: timestamp("voucher_date", { withTimezone: true }), // Ngày chứng từ
+  voucherNo: text("voucher_no"), // Số chứng từ
+  invoiceNo: text("invoice_no"), // Số hóa đơn
+  partnerName: text("partner_name").notNull(), // Nhà cung cấp
+  description: text("description"), // Diễn giải
+  amountBeforeTax: integer("amount_before_tax").notNull().default(0), // Tổng tiền hàng
+  discountAmount: integer("discount_amount").notNull().default(0), // Tiền chiết khấu
+  vatAmount: integer("vat_amount").notNull().default(0), // Tiền thuế GTGT
+  totalAmount: integer("total_amount").notNull().default(0), // Tổng tiền thanh toán
+  purchaseCost: integer("purchase_cost").notNull().default(0), // Chi phí mua hàng
+  inventoryValue: integer("inventory_value").notNull().default(0), // Giá trị nhập kho
+  // "not_received" | "received" | "none" — khớp 3 giá trị thật trong sổ gốc (Chưa nhận HĐ /
+  // Đã nhận HĐ / Không có HĐ)
+  invoiceStatus: text("invoice_status").notNull().default("not_received"),
+  isPurchaseCost: boolean("is_purchase_cost").notNull().default(false), // Là chi phí mua hàng
+  documentType: text("document_type"), // Loại chứng từ
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// Chấm công
+// ---------------------------------------------------------------------------
+
 // Chấm công KTV — vào ca / ra ca đơn giản, KHÔNG gắn với lệnh sửa chữa cụ thể nào (một ca
 // làm việc thường trải trên nhiều lệnh cùng lúc). `actualMinutes` ở service_order_labors là
 // giờ công cho TỪNG dòng việc; bảng này là giờ có mặt tại xưởng, hai khái niệm khác nhau.
