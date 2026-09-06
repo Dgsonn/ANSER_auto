@@ -1,12 +1,16 @@
-// Import một lần dữ liệu thật năm 2025 (bán hàng / mua hàng / tồn kho) do mẹ người dùng
-// gửi qua Excel. Đọc từ file JSON đã làm sạch bằng script Python (scratchpad, không commit),
-// KHÔNG đọc trực tiếp Excel. Dùng SQL thô qua cùng driver `@neondatabase/serverless` mà
-// `src/server/db/client.ts` dùng (không import schema.ts trực tiếp — .mjs không chạy được
-// TypeScript mà không thêm loader mới chỉ cho 1 script dùng một lần).
+// Import dữ liệu thật (bán hàng / mua hàng / tồn kho) do mẹ người dùng gửi qua Excel — dùng
+// lại được cho MỌI đợt sau này (không chỉ đợt 2025 đầu tiên), miễn JSON đầu vào đúng cấu
+// trúc (xem scratchpad/export_legacy.py). Đọc từ file JSON đã làm sạch, KHÔNG đọc trực tiếp
+// Excel. Dùng SQL thô qua cùng driver `@neondatabase/serverless` mà `src/server/db/client.ts`
+// dùng (không import schema.ts trực tiếp — .mjs không chạy được TypeScript mà không thêm
+// loader mới chỉ cho 1 script).
 //
-// Idempotent theo `parts.code` (trong 1 chi nhánh); sales/purchase ledger không có khoá tự
-// nhiên đáng tin trong dữ liệu gốc nên script chỉ insert khi bảng tương ứng đang RỖNG —
-// chạy lại sau khi đã có dữ liệu sẽ tự bỏ qua, không tạo trùng.
+// Idempotent theo từng dòng, chạy lại/chạy với đợt dữ liệu mới đều an toàn:
+// - parts: khoá tự nhiên là `code` trong 1 chi nhánh — chỉ thêm mã CHƯA có, không sửa lại
+//   tồn kho của mã đã có (mã cũ có thể đã bị lệch đi vì nhập/xuất thật qua app từ lúc import
+//   trước, ghi đè theo Excel cũ hơn là sai — nếu cần cập nhật tồn, sửa tay qua UI Kho phụ tùng).
+// - sales_ledger / purchase_ledger: không có khoá tự nhiên rõ ràng trong dữ liệu gốc — dùng
+//   khoá ghép (số chứng từ + ngày) làm định danh, chỉ thêm dòng nào chưa từng có khoá đó.
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
@@ -60,15 +64,26 @@ async function importParts(branchId) {
   );
 }
 
+// Khoá ghép "số chứng từ + ngày (yyyy-mm-dd)" — đủ để coi 2 dòng là cùng 1 chứng từ thật,
+// không cần chuẩn xác tuyệt đối như UUID vì mục đích chỉ là chặn import trùng giữa các đợt.
+function voucherKey(voucherNo, dateIso) {
+  return `${voucherNo ?? ""}__${(dateIso ?? "").slice(0, 10)}`;
+}
+
 async function importSalesLedger() {
-  const { rows } = await pool.query(`select count(*)::int as count from sales_ledger`);
-  if (rows[0].count > 0) {
-    console.log(
-      `sales_ledger: bỏ qua (đã có ${rows[0].count} dòng — chỉ chạy trên bảng rỗng để tránh trùng).`,
-    );
+  const { rows: existing } = await pool.query(
+    `select voucher_no, voucher_date from sales_ledger`,
+  );
+  const existingKeys = new Set(
+    existing.map((r) => voucherKey(r.voucher_no, r.voucher_date.toISOString())),
+  );
+  const toInsert = data.sales.filter((s) => !existingKeys.has(voucherKey(s.voucherNo, s.voucherDate)));
+
+  if (toInsert.length === 0) {
+    console.log(`sales_ledger: bỏ qua (đã có đủ ${data.sales.length} chứng từ, không có dòng mới).`);
     return;
   }
-  for (const s of data.sales) {
+  for (const s of toInsert) {
     await pool.query(
       `insert into sales_ledger
          (voucher_date, voucher_no, invoice_no, partner_name, amount_before_tax, vat_amount,
@@ -87,18 +102,29 @@ async function importSalesLedger() {
       ],
     );
   }
-  console.log(`sales_ledger: đã thêm ${data.sales.length} dòng.`);
+  console.log(
+    `sales_ledger: đã thêm ${toInsert.length} (bỏ qua ${data.sales.length - toInsert.length} chứng từ đã có).`,
+  );
 }
 
 async function importPurchaseLedger() {
-  const { rows } = await pool.query(`select count(*)::int as count from purchase_ledger`);
-  if (rows[0].count > 0) {
+  const { rows: existing } = await pool.query(
+    `select voucher_no, posting_date from purchase_ledger`,
+  );
+  const existingKeys = new Set(
+    existing.map((r) => voucherKey(r.voucher_no, r.posting_date.toISOString())),
+  );
+  const toInsert = data.purchases.filter(
+    (p) => !existingKeys.has(voucherKey(p.voucherNo, p.postingDate)),
+  );
+
+  if (toInsert.length === 0) {
     console.log(
-      `purchase_ledger: bỏ qua (đã có ${rows[0].count} dòng — chỉ chạy trên bảng rỗng để tránh trùng).`,
+      `purchase_ledger: bỏ qua (đã có đủ ${data.purchases.length} chứng từ, không có dòng mới).`,
     );
     return;
   }
-  for (const p of data.purchases) {
+  for (const p of toInsert) {
     await pool.query(
       `insert into purchase_ledger
          (posting_date, voucher_date, voucher_no, invoice_no, partner_name, description,
@@ -124,7 +150,9 @@ async function importPurchaseLedger() {
       ],
     );
   }
-  console.log(`purchase_ledger: đã thêm ${data.purchases.length} dòng.`);
+  console.log(
+    `purchase_ledger: đã thêm ${toInsert.length} (bỏ qua ${data.purchases.length - toInsert.length} chứng từ đã có).`,
+  );
 }
 
 const branchId = await findBodyworkBranch();

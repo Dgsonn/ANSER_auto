@@ -6,7 +6,13 @@ import AuthShell from "@/components/AuthShell";
 import FloatingInput from "@/components/FloatingInput";
 import { flowLandingPath } from "@/lib/flow";
 
-const DEMO_ACCOUNT = { email: "demo@anser.auto", password: "demo1234" };
+// Nút điền nhanh cho tài khoản demo/test — tiện bấm thử các luồng giao diện khác nhau
+// (quản lý / kế toán / KTV) mà không phải nhớ email + mật khẩu tạm.
+const QUICK_ACCOUNTS = [
+  { label: "Tài khoản demo", email: "demo@anser.auto", password: "demo1234" },
+  { label: "Tài khoản Kế toán", email: "ketoan@anser.auto", password: "aa660156" },
+  { label: "Tài khoản KTV", email: "ktv@anser.auto", password: "f7820a49" },
+];
 
 function LoginForm() {
   const router = useRouter();
@@ -18,9 +24,9 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  function fillDemoAccount() {
-    setEmail(DEMO_ACCOUNT.email);
-    setPassword(DEMO_ACCOUNT.password);
+  function fillAccount(account: { email: string; password: string }) {
+    setEmail(account.email);
+    setPassword(account.password);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -92,17 +98,20 @@ function LoginForm() {
         </button>
       </form>
 
-      <div className="mt-10 border-t border-white/[0.08] pt-6">
-        <button
-          type="button"
-          onClick={fillDemoAccount}
-          className="flex w-full items-center justify-between rounded-xl border border-white/[0.08] bg-black/30 p-3 text-left transition-colors hover:border-orange-500/40 hover:bg-orange-500/5"
-        >
-          <span className="text-xs font-semibold text-zinc-400">
-            <span className="mr-1">👤</span> Tài khoản demo
-          </span>
-          <span className="font-mono text-xs text-zinc-500">{DEMO_ACCOUNT.email}</span>
-        </button>
+      <div className="mt-10 flex flex-col gap-2 border-t border-white/[0.08] pt-6">
+        {QUICK_ACCOUNTS.map((account) => (
+          <button
+            key={account.email}
+            type="button"
+            onClick={() => fillAccount(account)}
+            className="flex w-full items-center justify-between rounded-xl border border-white/[0.08] bg-black/30 p-3 text-left transition-colors hover:border-orange-500/40 hover:bg-orange-500/5"
+          >
+            <span className="text-xs font-semibold text-zinc-400">
+              <span className="mr-1">👤</span> {account.label}
+            </span>
+            <span className="font-mono text-xs text-zinc-500">{account.email}</span>
+          </button>
+        ))}
       </div>
     </AuthShell>
   );

@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { MoneyField, TextField } from "@/components/ui/Field";
+import Modal from "@/components/ui/Modal";
 import {
   Badge,
   Card,
   EmptyState,
   ErrorBanner,
+  GhostButton,
   PageHeader,
+  PrimaryButton,
   TableWrap,
   formatDate,
   formatVnd,
@@ -25,6 +29,18 @@ type SalesLedgerEntry = {
   goodsDelivered: boolean;
 };
 
+const EMPTY_FORM = {
+  voucherDate: new Date().toISOString().slice(0, 10),
+  voucherNo: "",
+  invoiceNo: "",
+  partnerName: "",
+  amountBeforeTax: 0,
+  vatAmount: 0,
+  totalAmount: 0,
+  invoiceIssued: false,
+  goodsDelivered: false,
+};
+
 export default function SalesLedgerPage() {
   const [entries, setEntries] = useState<SalesLedgerEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -32,6 +48,11 @@ export default function SalesLedgerPage() {
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const load = useCallback(async (term: string, fromDate: string, toDate: string) => {
     setLoading(true);
@@ -59,11 +80,39 @@ export default function SalesLedgerPage() {
 
   const totalAmount = entries.reduce((sum, e) => sum + e.totalAmount, 0);
 
+  function openCreate() {
+    setForm(EMPTY_FORM);
+    setCreateError(null);
+    setCreating(true);
+  }
+
+  async function handleCreateSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setCreateError(null);
+    try {
+      const res = await fetch("/api/sales-ledger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.message ?? "Không lưu được.");
+      setCreating(false);
+      await load(search, from, to);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Lỗi không xác định.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title="Sổ bán hàng"
         subtitle="Hoá đơn bán hàng hoá, dịch vụ — sổ kế toán khai thuế, không gắn lệnh sửa xe cụ thể."
+        action={<PrimaryButton onClick={openCreate}>+ Thêm chứng từ</PrimaryButton>}
       />
 
       <ErrorBanner message={error} />
@@ -155,6 +204,95 @@ export default function SalesLedgerPage() {
           </TableWrap>
         )}
       </Card>
+
+      {creating && (
+        <Modal
+          title="Thêm chứng từ bán hàng"
+          onClose={() => setCreating(false)}
+          footer={
+            <>
+              <GhostButton type="button" onClick={() => setCreating(false)}>
+                Huỷ
+              </GhostButton>
+              <PrimaryButton type="submit" form="sales-ledger-form" disabled={saving}>
+                {saving ? "Đang lưu..." : "Lưu"}
+              </PrimaryButton>
+            </>
+          }
+        >
+          <form
+            id="sales-ledger-form"
+            onSubmit={handleCreateSubmit}
+            className="flex flex-col gap-4"
+          >
+            <ErrorBanner message={createError} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                label="Ngày chứng từ"
+                type="date"
+                required
+                value={form.voucherDate}
+                onChange={(e) => setForm((p) => ({ ...p, voucherDate: e.target.value }))}
+              />
+              <TextField
+                label="Khách hàng"
+                required
+                value={form.partnerName}
+                onChange={(e) => setForm((p) => ({ ...p, partnerName: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                label="Số chứng từ"
+                value={form.voucherNo}
+                onChange={(e) => setForm((p) => ({ ...p, voucherNo: e.target.value }))}
+              />
+              <TextField
+                label="Số hoá đơn"
+                value={form.invoiceNo}
+                onChange={(e) => setForm((p) => ({ ...p, invoiceNo: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <MoneyField
+                label="Tiền hàng"
+                value={form.amountBeforeTax}
+                onValueChange={(v) => setForm((p) => ({ ...p, amountBeforeTax: v }))}
+              />
+              <MoneyField
+                label="Thuế GTGT"
+                value={form.vatAmount}
+                onValueChange={(v) => setForm((p) => ({ ...p, vatAmount: v }))}
+              />
+              <MoneyField
+                label="Tổng thanh toán"
+                value={form.totalAmount}
+                onValueChange={(v) => setForm((p) => ({ ...p, totalAmount: v }))}
+              />
+            </div>
+            <div className="flex flex-wrap gap-5">
+              <label className="flex items-center gap-2 text-sm text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={form.invoiceIssued}
+                  onChange={(e) => setForm((p) => ({ ...p, invoiceIssued: e.target.checked }))}
+                  className="h-4 w-4 accent-orange-500"
+                />
+                Đã lập hoá đơn
+              </label>
+              <label className="flex items-center gap-2 text-sm text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={form.goodsDelivered}
+                  onChange={(e) => setForm((p) => ({ ...p, goodsDelivered: e.target.checked }))}
+                  className="h-4 w-4 accent-orange-500"
+                />
+                Đã xuất hàng
+              </label>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
